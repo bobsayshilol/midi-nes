@@ -158,6 +158,7 @@ void playback_start_tone(MIDINES_State* state, uint8_t channel, uint8_t tone, ui
 }
 
 void playback_stop_tone(MIDINES_State* state, uint8_t channel) {
+    // Note: the tone won't be stopped until playback_apply_stops() is called (end of frame).
     uint8_t& tone = state->tones[channel];
     if (tone != 0) {
         state->stop_tones[channel] = tone;
@@ -166,7 +167,24 @@ void playback_stop_tone(MIDINES_State* state, uint8_t channel) {
     }
 }
 
-void playback_voice_common(MIDINES_State* state, uint8_t channel, uint8_t volume, uint32_t freq, uint8_t len) {
+void playback_apply_stops(MIDINES_State* state) {
+    for (int channel = 0; channel < NUM_CHANNELS; channel++) {
+        uint8_t& stop_tone = state->stop_tones[channel];
+        if (stop_tone != 0 && stop_tone != state->tones[channel]) {
+            tone_off(state->handle, channel, stop_tone);
+            stop_tone = 0;
+        }
+    }
+}
+
+void playback_kill_all(MIDINES_State* state) {
+    for (int channel = 0; channel < NUM_CHANNELS; channel++) {
+        playback_stop_tone(state, channel);
+    }
+    playback_apply_stops(state);
+}
+
+void playback_channel_common(MIDINES_State* state, uint8_t channel, uint8_t volume, uint32_t freq, uint8_t len) {
     const uint8_t channel_bit = 1 << channel;
     if (state->channels_enabled & channel_bit) {
         if (volume > 0 && freq > 1) {
@@ -183,6 +201,7 @@ void playback_voice_common(MIDINES_State* state, uint8_t channel, uint8_t volume
         playback_stop_tone(state, channel);
     }
 
+    // Note: this assumes that we get called once a frame.
     uint8_t& timer = state->channel_timer[channel];
     if (timer > 0 && --timer == 0) {
         playback_stop_tone(state, channel);
@@ -198,7 +217,7 @@ void playback_noise(MIDINES_State* state, uint8_t channel) {
     const uint8_t b2 = state->registers[channel * 4 + 2];
     const uint32_t freq = (b2 & 0x0f) * 128;
 
-    playback_voice_common(state, channel, volume, freq, len);
+    playback_channel_common(state, channel, volume, freq, len);
 }
 
 void playback_pulse(MIDINES_State* state, uint8_t channel) {
@@ -211,7 +230,7 @@ void playback_pulse(MIDINES_State* state, uint8_t channel) {
     const uint8_t b2 = state->registers[channel * 4 + 2];
     const uint32_t freq = b2 + (b3 & 0x07) * 256;
 
-    playback_voice_common(state, channel, volume, freq, len);
+    playback_channel_common(state, channel, volume, freq, len);
 }
 
 void playback_triangle(MIDINES_State* state, uint8_t channel) {
@@ -223,17 +242,7 @@ void playback_triangle(MIDINES_State* state, uint8_t channel) {
     const uint8_t b2 = state->registers[channel * 4 + 2];
     const uint32_t freq = b2 + (b3 & 0x07) * 256;
 
-    playback_voice_common(state, channel, volume, freq, len);
-}
-
-void playback_stop_all(MIDINES_State* state) {
-    for (int channel = 0; channel <= 3; channel++) {
-        uint8_t& stop_tone = state->stop_tones[channel];
-        if (stop_tone != 0 && stop_tone != state->tones[channel]) {
-            tone_off(state->handle, channel, stop_tone);
-            stop_tone = 0;
-        }
-    }
+    playback_channel_common(state, channel, volume, freq, len);
 }
 
 } // namespace
@@ -251,6 +260,7 @@ MIDINES_State* midines_open() {
 void midines_close(MIDINES_State* state) {
     if (!state) return;
 
+    playback_kill_all(state);
     midi_close(state->handle);
     free(state);
 }
@@ -279,7 +289,7 @@ bool midines_write(MIDINES_State* state, uint16_t addr, uint8_t value) {
 void midines_update(MIDINES_State* state) {
     if (!state) return;
 
-    playback_stop_all(state);
+    playback_apply_stops(state);
     playback_pulse(state, CH_Pulse1);
     playback_pulse(state, CH_Pulse2);
     playback_triangle(state, CH_Triangle);

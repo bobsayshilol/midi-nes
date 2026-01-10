@@ -95,9 +95,6 @@ void play_notes(MIDINES_State* state) {
         midines_write(state, 0x4003, periodTableHi[i]);
         loop_for_frames(state, 5);
     }
-
-    // Give the final note time to fade off.
-    loop_for_frames(state, 16);
 }
 
 } // namespace
