@@ -19,7 +19,7 @@ using Handle = HMIDIOUT;
 #define NUM_CHANNELS 4
 
 struct MIDINES_State {
-    uint8_t registers[(NUM_CHANNELS + 1) * 4]; // TODO: channel +1 is unused?
+    uint8_t registers[NUM_CHANNELS * 4];
     uint8_t channels_enabled;
 
     uint8_t pending_write;
@@ -268,22 +268,18 @@ void midines_close(MIDINES_State* state) {
 bool midines_write(MIDINES_State* state, uint16_t addr, uint8_t value) {
     if (!state) return false;
 
-    // 0x4000:0x4013 - voice write
-    if (0x4000 <= addr && addr < 0x4000 + 20) {
-        const uint16_t offset = addr - 0x4000;
+    const uint16_t offset = addr - 0x4000;
+    if (offset < NUM_CHANNELS * 4) {
+        // 0x4000:0x4013 - channel write
         state->registers[offset] = value;
         const uint8_t channel = offset / 4;
-        if (channel < NUM_CHANNELS) {
-            state->pending_write |= 1 << channel;
-        }
-        return true;
-    }
-    // 0x4015 - enable/disable voices
-    else if (addr == 0x4015) {
+        state->pending_write |= 1 << channel;
+    } else if (offset == 0x15) {
+        // 0x4015 - enable/disable channels
         state->channels_enabled = value;
-        return true;
     }
-    return false;
+
+    return true;
 }
 
 void midines_update(MIDINES_State* state) {
