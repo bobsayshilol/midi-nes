@@ -65,7 +65,7 @@ void play_noise(MIDINES_State* state) {
     loop_for_frames(state, 60);
 }
 
-void play_notes(MIDINES_State* state) {
+void play_notes(MIDINES_State* state, bool change_instruments) {
     printf("%s\n", __func__);
 
     const uint8_t periodTableLo[] = {
@@ -91,6 +91,9 @@ void play_notes(MIDINES_State* state) {
     init_apu(state);
     midines_write(state, 0x4000, 0b10110111);
     for (size_t i = 0; i < sizeof(periodTableLo) / sizeof(periodTableLo[0]); i++) {
+        if (change_instruments) {
+            midines_set_instruments(state, i, i, 0, 0);
+        }
         midines_write(state, 0x4002, periodTableLo[i]);
         midines_write(state, 0x4003, periodTableHi[i]);
         loop_for_frames(state, 5);
@@ -110,7 +113,8 @@ int main() {
     play_pulse(state);
     play_triangle(state);
     play_noise(state);
-    play_notes(state);
+    play_notes(state, false);
+    play_notes(state, true);
 
     // Close up shop.
     midines_close(state);

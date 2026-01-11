@@ -28,6 +28,9 @@ struct MIDINES_State {
     uint8_t volumes[NUM_CHANNELS];
     uint8_t stop_tones[NUM_CHANNELS];
 
+    uint8_t triangle_volume;
+    uint8_t noise_volume;
+
     Handle handle;
 };
 
@@ -93,18 +96,19 @@ void midi_send(Handle& handle, uint32_t msg) {
 // Utils
 //
 
-void select_instrument(Handle& handle, uint32_t channel, uint32_t patch) {
-    midi_send(handle, 0xC0 | channel | (patch << 8));
+void select_instrument(Handle& handle, uint8_t channel, uint8_t patch) {
+    midi_send(handle, 0xC0 | channel | (static_cast<uint32_t>(patch) << 8));
 }
 
-void tone_off(Handle& handle, uint32_t channel, uint32_t tone) {
-    tone = std::clamp(tone, 0U, 127U);
-    midi_send(handle, 0x80 | channel | (tone << 8));
+void tone_off(Handle& handle, uint8_t channel, uint8_t tone) {
+    tone = std::clamp<uint8_t>(tone, 0U, 127U);
+    midi_send(handle, 0x80 | channel | (static_cast<uint32_t>(tone) << 8));
 }
 
-void tone_on(Handle& handle, uint32_t channel, uint32_t tone, uint32_t volume) {
-    tone = std::clamp(tone, 0U, 127U);
-    midi_send(handle, 0x90 | channel | (tone << 8) | (volume << 16));
+void tone_on(Handle& handle, uint8_t channel, uint8_t tone, uint8_t volume) {
+    tone = std::clamp<uint8_t>(tone, 0U, 127U);
+    volume = std::clamp<uint8_t>(volume, 0U, 127U);
+    midi_send(handle, 0x90 | channel | (static_cast<uint32_t>(tone) << 8) | (static_cast<uint32_t>(volume) << 16));
 }
 
 uint8_t get_tone(uint32_t freq) {
@@ -125,26 +129,13 @@ const uint8_t vlengths[32] = {
      96,  12,  36,  13,   8,  14,  16,  15,
 };
 
-// These are MIDI Program Numbers.
-// See https://en.wikipedia.org/wiki/General_MIDI#Program_change_events
-// TODO: allow these to be customised
-const uint8_t PN_Pulse = 80;
-const uint8_t PN_Triangle = 74;
-const uint8_t PN_Noise = 127;
-
-void playback_init(MIDINES_State* state) {
-    select_instrument(state->handle, CH_Pulse1, PN_Pulse);
-    select_instrument(state->handle, CH_Pulse2, PN_Pulse);
-    select_instrument(state->handle, CH_Triangle, PN_Triangle);
-    select_instrument(state->handle, CH_Noise, PN_Noise);
-}
-
 void playback_start_tone(MIDINES_State* state, uint8_t channel, uint8_t tone, uint8_t volume) {
     uint8_t& current_tone = state->tones[channel];
     uint8_t& current_volume = state->volumes[channel];
 
     // Stop current playback if there's a change.
-    if (tone != current_tone || volume + 3 < current_volume || volume > current_volume || volume == 0) {
+    // TODO: magic number here
+    if (tone != current_tone || volume + 3 * 8 < current_volume || volume > current_volume || volume == 0) {
         tone_off(state->handle, channel, current_tone);
         current_tone = 0;
         current_volume = 0;
@@ -153,7 +144,7 @@ void playback_start_tone(MIDINES_State* state, uint8_t channel, uint8_t tone, ui
     if (tone > 0 && tone <= 127 && volume > 0) {
         current_volume = volume;
         current_tone = tone;
-        tone_on(state->handle, channel, tone, volume * 8);
+        tone_on(state->handle, channel, tone, volume);
     }
 }
 
@@ -209,7 +200,7 @@ void playback_channel_common(MIDINES_State* state, uint8_t channel, uint8_t volu
 }
 
 void playback_noise(MIDINES_State* state, uint8_t channel) {
-    const uint8_t volume = 6; // TODO: customise
+    const uint8_t volume = state->noise_volume;
 
     const uint8_t b3 = state->registers[channel * 4 + 3];
     const uint8_t len = vlengths[b3 >> 3];
@@ -222,7 +213,7 @@ void playback_noise(MIDINES_State* state, uint8_t channel) {
 
 void playback_pulse(MIDINES_State* state, uint8_t channel) {
     const uint8_t b0 = state->registers[channel * 4 + 0];
-    const uint8_t volume = b0 & 0x0f;
+    const uint8_t volume = (b0 & 0x0f) << 3; // 127 is max, 0xf<<3 is 120
 
     const uint8_t b3 = state->registers[channel * 4 + 3];
     const uint8_t len = vlengths[b3 >> 3];
@@ -234,7 +225,7 @@ void playback_pulse(MIDINES_State* state, uint8_t channel) {
 }
 
 void playback_triangle(MIDINES_State* state, uint8_t channel) {
-    const uint8_t volume = 6; // TODO: customise
+    const uint8_t volume = state->triangle_volume;
 
     const uint8_t b3 = state->registers[channel * 4 + 3];
     const uint8_t len = vlengths[b3 >> 3];
@@ -253,7 +244,15 @@ MIDINES_State* midines_open() {
         free(state);
         return nullptr;
     }
-    playback_init(state);
+
+    // Set default MIDI Program Numbers.
+    const uint8_t PN_Pulse = 80;    // Synth Lead 1
+    const uint8_t PN_Triangle = 74; // Recorder
+    const uint8_t PN_Noise = 127;   // Gunshot
+    midines_set_instruments(state, PN_Pulse, PN_Pulse, PN_Triangle, PN_Noise);
+
+    // Set default volumes.
+    midines_set_volumes(state, 100, 64);
     return state;
 }
 
@@ -263,6 +262,25 @@ void midines_close(MIDINES_State* state) {
     playback_kill_all(state);
     midi_close(state->handle);
     free(state);
+}
+
+bool midines_set_instruments(MIDINES_State* state, uint8_t pulse1, uint8_t pulse2, uint8_t triangle, uint8_t noise) {
+    if (!state) return false;
+    if ((pulse1 | pulse2 | triangle | noise) > 127) return false;
+
+    select_instrument(state->handle, CH_Pulse1, pulse1);
+    select_instrument(state->handle, CH_Pulse2, pulse2);
+    select_instrument(state->handle, CH_Triangle, triangle);
+    select_instrument(state->handle, CH_Noise, noise);
+    return true;
+}
+
+void midines_set_volumes(MIDINES_State* state, uint8_t triangle, uint8_t noise) {
+    if (!state) return;
+    if ((triangle | noise) > 127) return;
+
+    state->triangle_volume = triangle;
+    state->noise_volume = noise;
 }
 
 bool midines_write(MIDINES_State* state, uint16_t addr, uint8_t value) {
