@@ -11,7 +11,7 @@ extern "C" {
 // The code itself is based on the code in olafnes 1.1c, which is a continuation of basicNES 2000.
 //
 
-struct MIDINES_State;
+typedef struct MIDINES_State MIDINES_State;
 
 // Open a MIDI device ready to be used as a NES output.
 MIDINES_State* midines_open();
