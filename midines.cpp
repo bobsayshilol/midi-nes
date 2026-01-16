@@ -32,6 +32,8 @@ struct MIDINES_State {
     uint8_t noise_volume;
 
     Handle handle;
+
+    bool silent;
 };
 
 namespace {
@@ -176,6 +178,8 @@ void playback_kill_all(MIDINES_State* state) {
 }
 
 void playback_channel_common(MIDINES_State* state, uint8_t channel, uint8_t volume, uint32_t freq, uint8_t len) {
+    if (state->silent) volume = 0;
+
     const uint8_t channel_bit = 1 << channel;
     if (state->channels_enabled & channel_bit) {
         if (volume > 0 && freq > 1) {
@@ -308,4 +312,10 @@ void midines_update(MIDINES_State* state) {
     playback_pulse(state, CH_Pulse2);
     playback_triangle(state, CH_Triangle);
     playback_noise(state, CH_Noise);
+}
+
+void midines_set_silent(MIDINES_State* state, bool silent) {
+    if (!state) return;
+
+    state->silent = silent;
 }

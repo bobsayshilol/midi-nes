@@ -32,8 +32,12 @@ void midines_set_volumes(MIDINES_State* state, uint8_t triangle, uint8_t noise);
 bool midines_write(MIDINES_State* state, uint16_t addr, uint8_t value);
 
 // Update the current playback.
-// Should be called at the end of each frame.
+// Must be called at the end of each frame.
 void midines_update(MIDINES_State* state);
+
+// Silence the output.
+// Call this rather than stopping calls to update()!
+void midines_set_silent(MIDINES_State* state, bool silent);
 
 #ifdef __cplusplus
 }
